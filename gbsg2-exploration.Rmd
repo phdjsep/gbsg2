@@ -73,14 +73,14 @@ While we're at it, I think years is a bit easier to understand than days so let'
 
 ```{r mutate columns}
 gbsg2 <- gbsg2 %>% 
-  mutate(time_yrs = time/365)
+  mutate(time_yrs = time/365, cens_fct = as.factor(cens))
 ```
 
 
 ```{r ggpairs, eval=F, echo=F}
 ### Visualize broadly
 # Let's use ggpairs to look at a few interesting cross-sections of features colored by censor group.
-ggpairs(gbsg2, mapping = aes(color = cens), columns = c("hor_th", "age", "time_yrs", "tgrade"))
+ggpairs(gbsg2, mapping = aes(color = cens_fct), columns = c("hor_th", "age", "time_yrs", "tgrade"))
 ```
 
 ### Survival Plot by Tumor Grade
@@ -95,26 +95,66 @@ ggsurv(gbsg_surv,
 ```
 
 
-### Create a model using a decision tree to predict censoring
-```{r}
+### Build Models 
+
+Let's explore different models from linear discriminate analysis to random forest and see which one provides us the most accurate prediction.
+
+TODO - fill in details of each algorithm and its pros/cons
+
+- Linear Discriminant Analysis (LDA)
+- Classification and Regression Trees (CART)
+- k-Nearest Neighbor (kNN)
+- Support Vector Machine (SVM)
+- Random Forest (RF)
+
+```{r warning=F}
 # Break up sample into train and test
-set.seed(123)
-assignment <- sample(1:2, nrow(gbsg2), prob = c(0.7, 0.3), replace = T)
+# set.seed(123)
+# assignment <- sample(1:2, nrow(gbsg2), prob = c(0.7, 0.3), replace = T)
+
+# Alternative method of sampling
+train_index <- createDataPartition(gbsg2$cens, p = 0.8, list = F)
+gbsg2_train <- gbsg2[train_index,] %>% select(-cens)
+gbsg2_test <- gbsg2[-train_index,] %>% select(-cens)
 
 # add groups to gbsg2 tibble
-gbsg2 <- gbsg2 %>% mutate(group = assignment)
-gbsg2_train <- gbsg2 %>% filter(group == 1)
-gbsg2_test <- gbsg2 %>% filter(group == 2)
+# gbsg2 <- gbsg2 %>% mutate(group = assignment)
+# gbsg2_train <- gbsg2 %>% filter(group == 1)
+# gbsg2_test <- gbsg2 %>% filter(group == 2)
 
-mod <- rpart(formula = cens ~ .,
-      data = gbsg2_train,
-      method = 'class',
-      parms = list(split = "gini"))
+# Setup 10-fold cross validation
+control <- trainControl(method = "cv", number = 10)
+metric <- "Accuracy"
 
-pred <- predict(object = mod, 
-        newdata = gbsg2_test, 
-        type = 'class')
+# a) linear algorithms
+set.seed(7)
+fit.lda <- train(cens_fct ~ ., data = gbsg2_train, method = "lda", metric = metric, trControl = control)
 
-confusionMatrix(data = pred, 
-                reference = as.factor(gbsg2_test$cens))
+# b) nonlinear algorithms
+# CART
+set.seed(7)
+fit.cart <- train(cens_fct ~ ., data = gbsg2_train, method = "rpart", metric = metric, trControl = control)
+# kNN
+set.seed(7)
+fit.knn <- train(cens_fct ~ ., data = gbsg2_train, method = "knn", metric = metric, trControl = control)
+
+# c) advanced algorithms
+# SVM
+set.seed(7)
+fit.svm <- train(cens_fct ~ ., data = gbsg2_train, method = "svmRadial", metric = metric, trControl = control)
+# Random Forest
+set.seed(7)
+fit.rf <- train(cens_fct ~ ., data = gbsg2_train, method = "rf", metric = metric, trControl = control)
+
+# summarize accuracy of models
+results <- resamples(list(lda = fit.lda, cart = fit.cart, knn = fit.knn, svm = fit.svm, rf = fit.rf))
+summary(results)
+
+dotplot(results)
+
+print(fit.rf)
+
+# estimate skill of RF on the validation dataset
+predictions <- predict(fit.rf, gbsg2_test)
+confusionMatrix(predictions, gbsg2_test$cens_fct)
 ```
