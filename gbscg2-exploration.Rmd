@@ -1,0 +1,90 @@
+---
+title: "GBSG2 Exploration"
+author: "Sep Dadsetan"
+date: "4/10/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(naniar)
+library(GGally)
+library(rpart) # recursive partitioning (decision tree)
+library(caret)
+```
+
+## Load Data
+
+```{r}
+data("GBSG2", package = "TH.data")
+gbsg2 <- GBSG2 %>% as_tibble()
+```
+
+### Feature Descriptions
+
+- **horTh**: hormonal therapy, a factor at two levels no and yes.
+- **age**: of the patients in years.
+- **menostat**: menopausal status, a factor at two levels `pre` (premenopausal) and `post` (postmenopausal).
+- **tsize**: tumor size (in mm).
+- **tgrade**: tumor grade, a ordered factor at levels `I < II < III`.
+- **pnodes**: number of positive nodes.
+- **progrec**: progesterone receptor (in fmol).
+- **estrec**: estrogen receptor (in fmol).
+- **time**: recurrence free survival time (in days).
+- **cens**: censoring indicator (0- censored, 1- event)
+
+## Explore Characteristics
+
+Take a look at characteristics like dimension, features, missingness, distribution, etc
+
+```{r}
+# Print tibble so we can look at the col types, values, types
+gbsg2
+
+# Use skim to look at summaries
+skim(gbsg2)
+
+# are there any missing values?
+miss_var_summary(gbsg2)
+```
+
+## Manipulate Data
+
+Make any transformations or imputations necessary to create a tidy dataset.
+
+- Is the data wide/long?
+- Are columns appropriately type'd?
+
+## Visualize broadly
+
+```{r}
+ggpairs(gbsg2, mapping = aes(color = menostat))
+
+library(survival)
+gbsg_surv <- survival::survfit(Surv(time, cens) ~ tgrade, data = gbsg2)
+ggsurv(gbsg_surv)
+```
+
+```{r}
+# Break up sample into train, test, validation
+set.seed(123)
+assignment <- sample(1:3, nrow(gbsg2), prob = c(0.7, 0.15, 0.15), replace = T)
+
+# add groups to gbsg2 tibble
+gbsg2 <- gbsg2 %>% mutate(group = assignment)
+
+mod <- rpart(formula = cens ~ ., 
+      data = gbsg2, 
+      method = 'class',
+      parms = list(split = "gini"))
+
+pred <- predict(object = mod, 
+        newdata = gbsg2_test, 
+        type = 'class')
+
+confusionMatrix(data = pred, 
+                reference = as.factor(gbsg2_test$cens))
+```
