@@ -14,16 +14,18 @@ library(naniar)
 library(GGally)
 library(rpart) # recursive partitioning (decision tree)
 library(caret)
+library(knitr)
+library(kableExtra)
+library(survival)
+library(randomForest)
 ```
 
-## Load Data
 
-```{r}
-data("GBSG2", package = "TH.data")
-gbsg2 <- GBSG2 %>% as_tibble()
-```
+### Description
 
-### Feature Descriptions
+The German Breast Cancer Study Group 2 (GBSG2) is a dataset consisting of 686 female breast cancer observations with 10 features (see below). Goal of this document will be to characterize the dataset and apply verious machine learning algorithms to help us predict the length of time which future patients may reach a censoring event.
+
+#### Feature Descriptions
 
 - **horTh**: hormonal therapy, a factor at two levels no and yes.
 - **age**: of the patients in years.
@@ -36,48 +38,76 @@ gbsg2 <- GBSG2 %>% as_tibble()
 - **time**: recurrence free survival time (in days).
 - **cens**: censoring indicator (0- censored, 1- event)
 
-## Explore Characteristics
-
-Take a look at characteristics like dimension, features, missingness, distribution, etc
+### Load Data
 
 ```{r}
-# Print tibble so we can look at the col types, values, types
-gbsg2
+data("GBSG2", package = "TH.data")
+gbsg2 <- GBSG2 %>% as_tibble() %>% clean_names()
+```
 
-# Use skim to look at summaries
+### Explore Characteristics
+
+Let's take a look at characteristics like dimension, feature, missingness, distribution, etc. As we stated above there are 686 observations x 10 features. `hor_th` and `menostat` are factors, `tgrade` is an ordinal, and the rest are integers. 
+
+```{r head tibble}
+# Print head of tibble so we can look at a few values
+head(gbsg2) %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "responsive"))
+```
+
+A quick summary of the features shows us a few points of interest:
+
+- there are no missing values (expected from an example dataset)
+- mean age of the dataset if 53 yo
+- mean recurrence free survival of about 3 years
+
+```{r skim and missingness}
+# Use skim to look at summaries and missingness
 skim(gbsg2)
-
-# are there any missing values?
-miss_var_summary(gbsg2)
 ```
 
-## Manipulate Data
+### Manipulate Data
 
-Make any transformations or imputations necessary to create a tidy dataset.
+While we're at it, I think years is a bit easier to understand than days so let's add that column.
 
-- Is the data wide/long?
-- Are columns appropriately type'd?
-
-## Visualize broadly
-
-```{r}
-ggpairs(gbsg2, mapping = aes(color = menostat))
-
-library(survival)
-gbsg_surv <- survival::survfit(Surv(time, cens) ~ tgrade, data = gbsg2)
-ggsurv(gbsg_surv)
+```{r mutate columns}
+gbsg2 <- gbsg2 %>% 
+  mutate(time_yrs = time/365)
 ```
 
+
+```{r ggpairs, eval=F, echo=F}
+### Visualize broadly
+# Let's use ggpairs to look at a few interesting cross-sections of features colored by censor group.
+ggpairs(gbsg2, mapping = aes(color = cens), columns = c("hor_th", "age", "time_yrs", "tgrade"))
+```
+
+### Survival Plot by Tumor Grade
+
+As expected, we see that patients with lower tumor grades have longer lengths of recurrence free survival.
+```{r survival plot, fig.align='center'}
+gbsg_surv <- survival::survfit(Surv(time_yrs, cens) ~ tgrade, data = gbsg2)
+ggsurv(gbsg_surv, 
+       main = "Survival Plot of Female Breast Cancer Patients by Tumor Grade",
+       xlab = "Time (yrs)",
+       ylab = "Survival (percent)")
+```
+
+
+### Create a model using a decision tree to predict censoring
 ```{r}
-# Break up sample into train, test, validation
+# Break up sample into train and test
 set.seed(123)
-assignment <- sample(1:3, nrow(gbsg2), prob = c(0.7, 0.15, 0.15), replace = T)
+assignment <- sample(1:2, nrow(gbsg2), prob = c(0.7, 0.3), replace = T)
 
 # add groups to gbsg2 tibble
 gbsg2 <- gbsg2 %>% mutate(group = assignment)
+gbsg2_train <- gbsg2 %>% filter(group == 1)
+gbsg2_test <- gbsg2 %>% filter(group == 2)
 
-mod <- rpart(formula = cens ~ ., 
-      data = gbsg2, 
+mod <- rpart(formula = cens ~ .,
+      data = gbsg2_train,
       method = 'class',
       parms = list(split = "gini"))
 
